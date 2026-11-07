@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.db
+*.key
+*.pem
+*.toml
+.env
+*-password*
+telegram.json
+repo/
