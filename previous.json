@@ -1,16 +1,16 @@
 {
   "version": 1,
-  "created_utc": "2026-11-08T09:34:06.852151+00:00",
+  "created_utc": "2026-11-08T09:56:05.426773+00:00",
   "fixed_fingerprint": "3af749210f975d33e868abcbbc72ddac2d71d72875ba6c4c78535f229552667a",
-  "state_fingerprint": "652fa68825b94f86144e3e59cfa8d62c74a2bc48c45a34679f1980288b108a90",
-  "critical_fingerprint": "d642c523badba72125e24778b5900331678376e79b498ade11c7c4496cfbf4bb",
+  "state_fingerprint": "3cc609bbce1319a044aaae848924af4401107cfaf6b73a0f1ed6e7950fdb5be2",
+  "critical_fingerprint": "131ea72892864a127343552431318c4894c89adc0bb7e477efc449259ab883c8",
   "platform": "ubuntu24.04-amd64",
   "fixed": {
     "path": "fixed-3af749210f975d33e868abcbbc72ddac2d71d72875ba6c4c78535f229552667a.enc",
     "sha256": "cee683438582af10887a9f99562328071bf3c15f45e81583a670fde5e0ba8e69"
   },
   "state": {
-    "path": "state-652fa68825b94f86144e3e59cfa8d62c74a2bc48c45a34679f1980288b108a90.enc",
-    "sha256": "0a327a794d71352fdda6672d3685fa72f03f3c791c28a22502a4a503ac727a0a"
+    "path": "state-3cc609bbce1319a044aaae848924af4401107cfaf6b73a0f1ed6e7950fdb5be2.enc",
+    "sha256": "0561df8b4a25c69e41b89d7757efa5e4f69279381a6cd0eb4e1c0c5c0fbe3fb5"
   }
 }
