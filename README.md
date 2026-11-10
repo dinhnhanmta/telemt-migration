@@ -26,7 +26,7 @@ Gói cố định chỉ tải lại khi binary/service hoặc thông tin cố đ
 
 ## Tự sao lưu
 
-File-watch phát hiện thay đổi cấu hình; timer kiểm tra bổ sung mỗi phút. Khách, cấu hình, quyền panel và chứng chỉ đổi sẽ tạo snapshot mới. Metrics/bộ đếm SQLite được kèm vào mỗi snapshot và kiểm tra checkpoint mỗi giờ để không commit/gửi Telegram liên tục chỉ vì biểu đồ thống kê. Nếu không có thay đổi, không commit và không gửi tin nhắn.
+File-watch phát hiện thay đổi cấu hình; timer kiểm tra bổ sung mỗi phút. Khách, cấu hình, quyền panel và chứng chỉ đổi sẽ tạo snapshot mới. Thời điểm hoạt động `sessions.*.LastSeen` và metrics/bộ đếm SQLite không tự kích hoạt backup. Chúng vẫn được kèm đầy đủ trong mỗi snapshot khi có thay đổi cần lưu. Tạo/thu hồi phiên đăng nhập, thay đổi passkey và cài đặt bảo mật vẫn được phát hiện. Nếu chỉ mở/xem panel hoặc có lưu lượng khách, không commit và không gửi tin nhắn; không có checkpoint thống kê tự gửi mỗi giờ.
 
 Snapshot mã hóa được đẩy lên GitHub và gửi dưới dạng tài liệu qua bot Telegram đã cấu hình. Mỗi gói cố định chỉ gửi khi nó đổi. Telegram lỗi sẽ giữ hàng đợi và thử lại; bản GitHub đã thành công vẫn được giữ.
 
@@ -36,7 +36,7 @@ systemctl status telemt-migration-backup.timer telemt-migration-backup.path
 journalctl -u telemt-migration-backup.service -n 30 --no-pager
 ```
 
-`--force` kiểm tra cả SQLite ngay, chỉ tạo snapshot nếu dữ liệu thực sự khác. Chạy lệnh này ngay trước khi chuyển VPS để lấy bộ đếm mới nhất.
+`--force` là lệnh thủ công, lấy cả thay đổi SQLite và thời điểm hoạt động của phiên, chỉ tạo snapshot nếu dữ liệu thực sự khác. Chạy lệnh này ngay trước khi chuyển VPS để lấy bộ đếm mới nhất.
 
 Sau khi phục hồi và kiểm tra thành công, VPS mới nhận quyền làm nguồn backup. VPS cũ thấy quyền đã chuyển sẽ ngừng ghi backup, nhưng **tiếp tục phục vụ khách**, tránh máy cũ ghi đè dữ liệu mới. Nếu dữ liệu nguồn đổi đúng lúc phục hồi, bộ cài dừng chuyển quyền và yêu cầu chạy lại trước khi đổi DNS.
 

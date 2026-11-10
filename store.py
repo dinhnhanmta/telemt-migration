@@ -4,6 +4,8 @@ from pathlib import Path
 from archive import *
 
 DATABASE='/var/lib/telemt-panel/panel.db'
+PANEL_STATE='/var/lib/telemt-panel/panel-state.json'
+CRITICAL_FINGERPRINT_VERSION=2
 VOLATILE_TABLES={'metric_points','history_events','user_ip_history','user_ip_history_collection',
  'user_traffic_buckets','user_traffic_collector','user_traffic_users'}
 
@@ -42,6 +44,27 @@ def source_paths(kind):
                     result[name+'/'+str(path.relative_to(source))]=path
     return result
 
+def critical_fingerprint(manifest,objects):
+    """Ignore observation counters and session touches, retaining security edits.
+
+    The archived bytes remain untouched. Creating/revoking a session, changing
+    passkeys/settings and changing file ownership/permissions still count.
+    """
+    critical=[]
+    for entry in sorted(manifest['entries'],key=lambda e:e['path']):
+        if entry['path']==DATABASE:continue
+        compare=dict(entry)
+        if entry['path']==PANEL_STATE and entry['type']=='file':
+            state=json.loads(objects[entry['sha256']])
+            if not isinstance(state,dict):raise ValueError('Invalid panel state')
+            sessions=state.get('sessions',{})
+            if isinstance(sessions,dict):
+                for session in sessions.values():
+                    if isinstance(session,dict):session.pop('LastSeen',None)
+            compare['sha256']=sha(json.dumps(state,sort_keys=True,separators=(',',':')).encode())
+        critical.append(compare)
+    return sha(json.dumps(critical,sort_keys=True).encode())
+
 def capture(kind):
     objects={};entries=[];finger=[]
     for name,source in sorted(source_paths(kind).items()):
@@ -60,9 +83,8 @@ def capture(kind):
     if kind=='fixed':
         required=set(FIXED_FILES)
         if not required.issubset({e['path'] for e in entries}):raise ValueError('Required binary/service/backup key missing')
-    critical=[e for e in finger if e['path']!=DATABASE]
     manifest={'version':1,'kind':kind,'entries':entries}
-    return manifest,objects,sha(json.dumps(finger,sort_keys=True).encode()),sha(json.dumps(critical,sort_keys=True).encode())
+    return manifest,objects,sha(json.dumps(finger,sort_keys=True).encode()),critical_fingerprint(manifest,objects)
 
 def account_manifest():
     result=[]

@@ -1,17 +1,34 @@
 """Push only changed encrypted snapshots; never stop or reload the live services."""
-import argparse,fcntl,json,os,time
+import argparse,fcntl,json,os
 from datetime import datetime,timezone
 from pathlib import Path
 from archive import *
-from store import capture,account_manifest,source_paths
+from store import capture,account_manifest,source_paths,critical_fingerprint,CRITICAL_FINGERPRINT_VERSION
 from transport import *
 
 def atomic_json(path,value):
     temp=path.with_suffix('.new');temp.write_text(json.dumps(value,indent=2));temp.chmod(0o600);temp.replace(path)
 
+def previous_critical(repo,previous,password,local):
+    if not previous:return None
+    if previous.get('critical_fingerprint_version')==CRITICAL_FINGERPRINT_VERSION:
+        return previous['critical_fingerprint']
+    # Migrate an old baseline by interpreting its authenticated archived bytes
+    # with the new rules. Do not send a false change notification on upgrade.
+    entry=previous['state'];cached=local.get('critical_baseline',{})
+    if cached.get('snapshot_sha256')==entry['sha256'] and cached.get('version')==CRITICAL_FINGERPRINT_VERSION:
+        return cached['fingerprint']
+    if not re.fullmatch(r'state-[a-f0-9]{64}\.enc',entry['path']):raise ValueError('Invalid previous snapshot filename')
+    data=(repo/entry['path']).read_bytes()
+    if sha(data)!=entry['sha256']:raise ValueError('Previous encrypted snapshot checksum mismatch')
+    manifest,objects=unpack(unseal(data,password),'state')
+    fingerprint=critical_fingerprint(manifest,objects)
+    local['critical_baseline']={'snapshot_sha256':entry['sha256'],'version':CRITICAL_FINGERPRINT_VERSION,'fingerprint':fingerprint}
+    return fingerprint
+
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--force',action='store_true',help='Include latest counters even before the hourly checkpoint')
+    parser.add_argument('--force',action='store_true',help='Manually include changed runtime counters and session timestamps')
     args=parser.parse_args()
     assert os.geteuid()==0,'Run as root'
     os.umask(0o077);WORK.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -26,7 +43,7 @@ def main():
         localfile=WORK/'last.json'
         local=json.loads(localfile.read_text()) if localfile.exists() else {}
         previous=json.loads((repo/'snapshot.json').read_text()) if (repo/'snapshot.json').exists() else {}
-        stamp=datetime.now(timezone.utc).isoformat();now=time.time()
+        stamp=datetime.now(timezone.utc).isoformat()
         signature=[(name,path.stat().st_size,path.stat().st_mtime_ns,path.stat().st_mode,path.stat().st_uid,path.stat().st_gid)
                    for name,path in sorted(source_paths('fixed').items())]
         stat_fingerprint=sha(json.dumps(signature).encode())
@@ -40,14 +57,13 @@ def main():
         else:fixed_hash=previous['fixed_fingerprint']
         state_manifest,state_objects,state_hash,critical_hash=capture('state')
         verify_certificates(state_manifest,state_objects)
-        critical_changed=critical_hash!=previous.get('critical_fingerprint')
-        due=args.force or now-local.get('last_database_checkpoint',0)>=3600
+        critical_changed=critical_hash!=previous_critical(repo,previous,password,local)
         state_changed=state_hash!=previous.get('state_fingerprint')
-        changed=bool(fixed_plain) or critical_changed or (state_changed and due)
+        changed=bool(fixed_plain) or critical_changed or (state_changed and args.force)
         if changed:
             state_plain=pack(state_manifest,state_objects)
             snapshot={'version':1,'created_utc':stamp,'fixed_fingerprint':fixed_hash,'state_fingerprint':state_hash,
-             'critical_fingerprint':critical_hash,'platform':'ubuntu24.04-amd64'}
+             'critical_fingerprint':critical_hash,'critical_fingerprint_version':CRITICAL_FINGERPRINT_VERSION,'platform':'ubuntu24.04-amd64'}
             pending=local.get('pending_telegram',[])
             if fixed_plain:
                 filename='fixed-'+fixed_hash+'.enc'
@@ -70,7 +86,7 @@ def main():
             for path in repo.glob('*.enc'):
                 if path.name not in keep:path.unlink()
             push(repo,'Encrypted Telemt recovery snapshot '+stamp)
-            local.update({'last_database_checkpoint':now,'pending_telegram':pending})
+            local.update({'pending_telegram':pending})
             print('Uploaded changed encrypted snapshot to GitHub: '+stamp)
         else:print('No recovery changes; no commit and no Telegram message.')
         local['fixed_stat']=stat_fingerprint
