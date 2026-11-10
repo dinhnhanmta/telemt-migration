@@ -1,0 +1,273 @@
+diff --git a/web/src/i18n/en.ts b/web/src/i18n/en.ts
+index 91f8568..fc5dea1 100644
+--- a/web/src/i18n/en.ts
++++ b/web/src/i18n/en.ts
+@@ -410,6 +410,8 @@ export const en: Dict = {
+       warning: "The secret is shown once — copy it now.",
+       close: "Done",
+       configureWeb: "Configure WEB access",
++      webReady: "WEB access is ready. Open the user to copy the WEB link.",
++      webFailed: "User created, but WEB setup did not finish. Keep this secret and use Configure WEB access; do not create the user again.",
+     },
+     detail: {
+       metrics: "Metrics",
+diff --git a/web/src/i18n/ru.ts b/web/src/i18n/ru.ts
+index 8086b7b..9fec9e7 100644
+--- a/web/src/i18n/ru.ts
++++ b/web/src/i18n/ru.ts
+@@ -448,6 +448,8 @@ export const ru = {
+       warning: "Секрет показывается один раз — скопируйте его сейчас.",
+       close: "Готово",
+       configureWeb: "Настроить WEB-доступ",
++      webReady: "WEB-доступ готов. Откройте пользователя, чтобы скопировать WEB-ссылку.",
++      webFailed: "Пользователь создан, но настройка WEB не завершена. Сохраните секрет и нажмите «Настроить WEB-доступ»; не создавайте пользователя повторно.",
+     },
+     detail: {
+       metrics: "Метрики",
+diff --git a/web/src/people/PersonDetail.tsx b/web/src/people/PersonDetail.tsx
+index f54b907..02cf045 100644
+--- a/web/src/people/PersonDetail.tsx
++++ b/web/src/people/PersonDetail.tsx
+@@ -14,7 +14,7 @@ import {UserFormSheet} from "./UserFormSheet";
+ import {PersonQuotaCard,ExpiryLine} from "./PersonSections";
+ import {PersonTrafficHistory} from "./PersonTrafficHistory";
+ import {PersonIPHistory,PersonIPHistoryEntry} from "./PersonIPHistory";
+-import {ConnectionLinks,QuickConnectionLinks} from "./ConnectionLinks";
++import {ConnectionLinks,QuickConnectionLinks} from "./ConnectionLinks.tsx";
+ import {SublinkPanel} from "./SublinkPanel";
+ import {WebAccessPanel} from "./WebAccessPanel";
+ import {PeopleContext} from "./PeopleContext";
+diff --git a/web/src/people/UserCard.tsx b/web/src/people/UserCard.tsx
+index ca8383b..7491437 100644
+--- a/web/src/people/UserCard.tsx
++++ b/web/src/people/UserCard.tsx
+@@ -3,7 +3,7 @@ import {formatBytes} from "../lib/format";
+ import {localeOf,useStrings} from "../i18n";
+ import {IconMore,IconRefresh,IconShield} from "../ui/icons";
+ import {computeUserStatus,getUserQuota,isOnline} from "./users.helpers";
+-import {QuickConnectionLinks} from "./ConnectionLinks";
++import {QuickConnectionLinks} from "./ConnectionLinks.tsx";
+ import {useUserRowGestures,type SwipeSide} from "./useUserRowGestures";
+ import type {UsersTopicQuotaEntry,UsersTopicUser} from "../realtime/topics";
+ 
+diff --git a/web/src/people/UserFormSheet.test.tsx b/web/src/people/UserFormSheet.test.tsx
+index 901ab3c..7f75d25 100644
+--- a/web/src/people/UserFormSheet.test.tsx
++++ b/web/src/people/UserFormSheet.test.tsx
+@@ -162,6 +162,15 @@ describe("user edit save acknowledgement", () => {
+ });
+ 
+ describe("Telemt user rate bounds", () => {
++  it("starts a new user with 2 IPs and leaves existing unlimited users unchanged", async () => {
++    await render("3.5.16", {}, "create");
++    expect(formInput(ru.people.form.maxIps).value).toBe("2");
++    await render("3.5.16", {}, "edit");
++    expect(formInput(ru.people.form.maxIps).value).toBe("");
++    await enter(formInput(ru.people.form.maxConnections), "10");
++    await submit();
++    expect(await requests[0]!.json()).toEqual({ max_tcp_conns: 10 });
++  });
+   it("blocks an out-of-range rate when creating a user", async () => {
+     await render("3.5.8", {}, "create");
+     await enter(container.querySelector<HTMLInputElement>('[data-testid="user-form-username"]')!, "bob");
+diff --git a/web/src/people/UserFormSheet.tsx b/web/src/people/UserFormSheet.tsx
+index 1d3c1a0..92edd17 100644
+--- a/web/src/people/UserFormSheet.tsx
++++ b/web/src/people/UserFormSheet.tsx
+@@ -1,5 +1,5 @@
+ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
+-import { useMutation } from "@tanstack/react-query";
++import { useMutation, useQueryClient } from "@tanstack/react-query";
+ import { Sheet, type SheetProps } from "../ui/Sheet";
+ import { Button } from "../ui/Button";
+ import { CopyField } from "../ui/CopyField";
+@@ -8,9 +8,11 @@ import { pushToast } from "../ui/Toast";
+ import { useStrings } from "../i18n";
+ import {
+   createUserMutation,
++  getTelemtWebAccessQueryKey,
+ } from "../lib/api/generated/@tanstack/react-query.gen";
+ import { patchUser } from "../lib/api/generated/sdk.gen";
+-import type { PatchUserError, User, UserPatch } from "../lib/api/generated/types.gen";
++import type { PatchUserError, User, UserCreate, UserPatch } from "../lib/api/generated/types.gen";
++import { createUserWithWeb } from "./createUserWithWeb";
+ import type { SubmittedDraft } from "../lib/draftSession";
+ import {
+   buildUserCreateBody,
+@@ -83,7 +85,7 @@ function initialCreateState(): FormState {
+     enabled: true,
+     userAdTag: field("", "clear"),
+     maxTcpConns: field(4, "clear"),
+-    maxUniqueIps: field(2, "clear"),
++    maxUniqueIps: field(2, "set"),
+     quotaAmount: field(10, "clear"),
+     quotaUnit: "GB",
+     quotaEdited: true,
+@@ -144,8 +146,9 @@ export function UserFormSheet({ open, onClose, mode, user, onSaved, onConfigureW
+   );
+   const [usernameTouched, setUsernameTouched] = useState(false);
+   const [createdSecret, setCreatedSecret] = useState<string | null>(null);
++  const [createdWebFailed, setCreatedWebFailed] = useState(false);
+   const [activePreset, setActivePreset] = useState<"unlimited" | "personal" | "temporary" | null>(
+-    mode === "create" ? "unlimited" : null,
++    null,
+   );
+ 
+   // Reset local state whenever the sheet is (re)opened for a (possibly
+@@ -171,7 +174,8 @@ export function UserFormSheet({ open, onClose, mode, user, onSaved, onConfigureW
+       setState(initial);setBaseline(initial);setBaseUser(user);
+       setUsernameTouched(false);
+       setCreatedSecret(null);
+-      setActivePreset(mode === "create" ? "unlimited" : null);
++      setCreatedWebFailed(false);
++      setActivePreset(null);
+     }
+   }
+ 
+@@ -188,14 +192,19 @@ export function UserFormSheet({ open, onClose, mode, user, onSaved, onConfigureW
+   const dirty=JSON.stringify(state)!==JSON.stringify(baseline);
+   useEffect(()=>{onDirtyChange?.(dirty);},[dirty,onDirtyChange]);
+   const refreshTopic = useRefreshTopic();
++  const queryClient = useQueryClient();
+ 
+   const createMutation = useMutation({
+     ...createUserMutation(),
++    mutationFn: ({ body }: { body: UserCreate }) => createUserWithWeb(body),
+     onSuccess: (data) => {
+       pushToast(s.people.toast.created, "ok");
++      setCreatedWebFailed(data.webError !== undefined);
++      if (data.webError !== undefined) pushToast(s.people.newSecret.webFailed, "error");
+       onSaved?.(data.user.username);
+       setCreatedSecret(data.secret);
+       refreshUsersAfterMutation(refreshTopic);
++      void queryClient.invalidateQueries({ queryKey: getTelemtWebAccessQueryKey() });
+     },
+     onError: (err) => pushToast(apiErrorMessage(err, s), "error"),
+   });
+@@ -343,6 +352,7 @@ export function UserFormSheet({ open, onClose, mode, user, onSaved, onConfigureW
+       <FormSurface inline={inline} open={open} onClose={onClose} placement="form" title={s.people.newSecret.title} subtitle={state.username}>
+         <div className="flex flex-col gap-4 py-2">
+           <p className="rounded-xl border border-warn/30 bg-warn/10 p-3 text-sm text-warn">{s.people.newSecret.warning}</p>
++          <p role="status" className={createdWebFailed ? "text-sm text-warn" : "text-sm text-accent"}>{createdWebFailed ? s.people.newSecret.webFailed : s.people.newSecret.webReady}</p>
+           <CopyField value={createdSecret} label={s.people.form.secret} data-testid="created-user-secret" />
+           <div className="grid gap-2 sm:grid-cols-2">
+             <Button variant="secondary" onClick={onClose}>{s.people.newSecret.close}</Button>
+diff --git a/web/src/people/createUserWithWeb.ts b/web/src/people/createUserWithWeb.ts
+new file mode 100644
+--- /dev/null
++++ b/web/src/people/createUserWithWeb.ts
+@@ -0,0 +1,54 @@
++import { createUser, getTelemtReloadStatus, getTelemtWebAccess, putTelemtUserWebAccess } from "../lib/api/generated/sdk.gen";
++import type { CreateUserResponse, UserCreate, WebAccessView } from "../lib/api/generated/types.gen";
++import { apiErrorCode } from "./apiError";
++import { webProfilesForUser } from "./webAccess.helpers";
++
++export type CreatedWebUser = CreateUserResponse & { webError?: unknown };
++
++// Only the newly created user is changed. Read the current revision again after
++// creation, because creating an access user also changes the Telemt revision.
++export async function createUserWithWeb(body: UserCreate): Promise<CreatedWebUser> {
++  const signal = AbortSignal.timeout(60_000);
++  const { data: initial } = await getTelemtWebAccess({ throwOnError: true, signal });
++  if (!initial.enabled || !initial.vhosts.length) throw { code: "web_vhost_not_found" };
++  const host = initial.vhosts[0]!.host;
++  const { data: created } = await createUser({ body, throwOnError: true, signal });
++  try {
++    for (let attempt = 0; attempt < 3; attempt++) {
++      const { data: current } = await getTelemtWebAccess({ throwOnError: true, signal });
++      if (!current.enabled || !current.vhosts.some(v => v.host === host)) throw { code: "web_vhost_not_found" };
++      const profiles = profilesWithDefault(current, created.user.username, host);
++      try {
++        const { data: result } = await putTelemtUserWebAccess({
++          path: { username: created.user.username }, headers: { "If-Match": current.revision },
++          body: { profiles }, throwOnError: true, signal,
++        });
++        let reload = result.reload;
++        while (reload && reload.state !== "succeeded") {
++          if (reload.state === "failed" || reload.state === "rolled_back") throw { code: "reload_failed" };
++          await new Promise(resolve => setTimeout(resolve, 300));
++          const { data } = await getTelemtReloadStatus({ path: { id: reload.reload_id }, throwOnError: true, signal });
++          reload = data;
++        }
++        if (!reload && result.runtime_reload_required) throw { code: "reload_failed" };
++        return created;
++      } catch (error) {
++        if (apiErrorCode(error) === "revision_conflict" && attempt < 2) continue;
++        throw error;
++      }
++    }
++    throw { code: "revision_conflict" };
++  } catch (webError) {
++    // Creation already succeeded. Preserve its secret and show a recovery action;
++    // never retry POST /api/users or hide an existing account behind a create error.
++    return { ...created, webError };
++  }
++}
++
++function profilesWithDefault(view: WebAccessView, username: string, host: string) {
++  const profiles = webProfilesForUser(view, username);
++  if (!profiles.some(p => p.vhost === host && p.secret_mode === "dd")) {
++    profiles.push({ vhost: host, secret_mode: "dd" });
++  }
++  return profiles;
++}
+diff --git a/web/src/people/createUserWithWeb.test.ts b/web/src/people/createUserWithWeb.test.ts
+new file mode 100644
+--- /dev/null
++++ b/web/src/people/createUserWithWeb.test.ts
+@@ -0,0 +1,55 @@
++import { beforeEach, describe, expect, it, vi } from "vitest";
++import { createUser, getTelemtReloadStatus, getTelemtWebAccess, putTelemtUserWebAccess } from "../lib/api/generated/sdk.gen";
++import { createUserWithWeb } from "./createUserWithWeb";
++
++vi.mock("../lib/api/generated/sdk.gen", () => ({
++  createUser: vi.fn(), getTelemtReloadStatus: vi.fn(), getTelemtWebAccess: vi.fn(), putTelemtUserWebAccess: vi.fn(),
++}));
++const view = { enabled: true, revision: "before-create", vhosts: [{ host: "web.example.org", public_addr: "203.0.113.1:443", profiles: [{ user: "existing", secret_mode: "plain" as const }] }] };
++const created = { user: { username: "new-user" }, secret: "0123456789abcdef0123456789abcdef" };
++
++beforeEach(() => {
++  vi.resetAllMocks();
++  vi.mocked(getTelemtWebAccess).mockResolvedValue({ data: view } as never);
++  vi.mocked(createUser).mockResolvedValue({ data: created } as never);
++  vi.mocked(putTelemtUserWebAccess).mockResolvedValue({ data: { revision: "after-profile", changed: ["web.vhosts"], reload: { state: "succeeded", reload_id: 1 } } } as never);
++});
++
++describe("one-step WEB user creation", () => {
++  it("keeps the submitted expiry/limits and attaches DD using the post-create revision", async () => {
++    vi.mocked(getTelemtWebAccess).mockResolvedValueOnce({ data: view } as never).mockResolvedValueOnce({ data: { ...view, revision: "after-create" } } as never);
++    const body = { username: "new-user", max_unique_ips: 2, expiration_rfc3339: "2026-12-31T23:59:59Z" };
++    expect(await createUserWithWeb(body)).toEqual(created);
++    expect(createUser).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ body }));
++    expect(putTelemtUserWebAccess).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: { username: "new-user" }, headers: { "If-Match": "after-create" }, body: { profiles: [{ vhost: "web.example.org", secret_mode: "dd" }] } }));
++    expect(view.vhosts[0]!.profiles).toEqual([{ user: "existing", secret_mode: "plain" }]);
++  });
++
++  it("re-reads and retries only the WEB write when another configuration edit wins", async () => {
++    vi.mocked(putTelemtUserWebAccess).mockRejectedValueOnce({ code: "revision_conflict" });
++    await createUserWithWeb({ username: "new-user" });
++    expect(createUser).toHaveBeenCalledTimes(1);
++    expect(putTelemtUserWebAccess).toHaveBeenCalledTimes(2);
++    expect(getTelemtWebAccess).toHaveBeenCalledTimes(3);
++  });
++
++  it("does not create an unusable account when WEB is disabled", async () => {
++    vi.mocked(getTelemtWebAccess).mockResolvedValue({ data: { ...view, enabled: false } } as never);
++    await expect(createUserWithWeb({ username: "new-user" })).rejects.toEqual({ code: "web_vhost_not_found" });
++    expect(createUser).not.toHaveBeenCalled();
++  });
++
++  it("preserves an already created secret on WEB failure and never repeats creation", async () => {
++    vi.mocked(putTelemtUserWebAccess).mockRejectedValue({ code: "telemt_unreachable" });
++    expect(await createUserWithWeb({ username: "new-user" })).toEqual({ ...created, webError: { code: "telemt_unreachable" } });
++    expect(createUser).toHaveBeenCalledTimes(1);
++  });
++
++  it("waits for runtime activation and reports a rolled-back reload", async () => {
++    vi.mocked(putTelemtUserWebAccess).mockResolvedValue({ data: { revision: "r2", changed: ["web.vhosts"], reload: { state: "accepted", reload_id: 7 } } } as never);
++    vi.mocked(getTelemtReloadStatus).mockResolvedValue({ data: { state: "rolled_back", reload_id: 7 } } as never);
++    const result = await createUserWithWeb({ username: "new-user" });
++    expect(result.webError).toEqual({ code: "reload_failed" });
++    expect(getTelemtReloadStatus).toHaveBeenCalledWith(expect.objectContaining({ path: { id: 7 } }));
++  });
++});

@@ -1,5 +1,7 @@
 # Telemt Web + Panel + Caddy recovery
 
+Panel đang có [mặc định tạo user Web với 2 IP](panel-customization/README.md). Binary tùy chỉnh được lưu trong gói cố định mã hóa; phục hồi sẽ giữ tính năng này.
+
 Khôi phục **đúng binary, systemd service, khách/secret, cấu hình Web, database panel và bộ nhớ chứng chỉ Caddy** của máy đã sao lưu. Không chạy installer Telemt upstream và không tự mở cổng MTProxy công khai. Không chứa AWG, LucX hoặc Xray.
 
 ## Một lệnh khi chuyển VPS
