@@ -24,19 +24,39 @@ class BackupNoiseTests(unittest.TestCase):
         entry=next(e for e in manifest['entries'] if e['path']==store.PANEL_STATE)
         self.assertEqual(json.loads(objects[entry['sha256']])['sessions']['test-session']['LastSeen'],'2026-11-10T10:05:00Z')
 
-    def test_settings_passkeys_session_revocation_and_permissions_still_trigger(self):
+    def test_settings_passkeys_and_permissions_still_trigger(self):
         manifest,objects,_,baseline=fixture()
-        for change in ['setting','passkey','revoke','new_session','permission']:
+        for change in ['setting','passkey','permission']:
             m=copy.deepcopy(manifest);o=copy.deepcopy(objects)
             entry=next(e for e in m['entries'] if e['path']==store.PANEL_STATE)
             state=json.loads(o[entry['sha256']])
             if change=='setting':state['settings']['site']='changed'
             if change=='passkey':state['passkeys']['test-key']['public_key']='changed'
-            if change=='revoke':state['sessions'].clear()
-            if change=='new_session':state['sessions']['second']={'LastSeen':'now','Created':'now'}
             if change=='permission':entry['mode']=0o640
             data=json.dumps(state).encode();entry['sha256']=archive.sha(data);o[entry['sha256']]=data
             self.assertNotEqual(store.critical_fingerprint(m,o),baseline,change)
+
+    def test_regenerated_cache_and_new_sessions_do_not_trigger(self):
+        manifest,objects,_,baseline=fixture()
+        panel=next(e for e in manifest['entries'] if e['path']==store.PANEL_STATE)
+        state=json.loads(objects[panel['sha256']]);state.update(sessions={},audit=[{'action':'login'}],subpage_nonces={'test':'new'})
+        data=json.dumps(state).encode();panel['sha256']=archive.sha(data);objects[panel['sha256']]=data
+        for path in ['/opt/telemt/tlsfront','/opt/telemt/tlsfront/ozon.ru.json','/opt/telemt/cache/proxy-config-v4.txt']:
+            manifest['entries'].append({**panel,'path':path})
+        self.assertEqual(store.critical_fingerprint(manifest,objects),baseline)
+        for path in ['/etc/telemt/telemt.toml','/etc/caddy/Caddyfile','/var/lib/caddy/.local/share/caddy/certificates/domain.crt','/opt/telemt/cache-extra/config']:
+            manifest['entries'].append({**panel,'path':path})
+            self.assertNotEqual(store.critical_fingerprint(manifest,objects),baseline,path)
+            manifest['entries'].pop()
+
+    def test_restore_requires_new_login_but_preserves_panel_credentials_and_settings(self):
+        original=fixture();manifest,objects=store.without_active_sessions(*original[:2])
+        panel=next(e for e in manifest['entries'] if e['path']==store.PANEL_STATE)
+        state=json.loads(objects[panel['sha256']])
+        self.assertNotIn('sessions',state)
+        self.assertIn('passkeys',state)
+        self.assertEqual(state['settings'],{'site':'keep'})
+        self.assertEqual(store.critical_fingerprint(manifest,objects),original[3])
 
     def exercise_backup(self,changed,force=False):
         with tempfile.TemporaryDirectory() as tmp:

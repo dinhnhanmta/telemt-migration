@@ -5,7 +5,10 @@ from archive import *
 
 DATABASE='/var/lib/telemt-panel/panel.db'
 PANEL_STATE='/var/lib/telemt-panel/panel-state.json'
-CRITICAL_FINGERPRINT_VERSION=2
+CRITICAL_FINGERPRINT_VERSION=3
+RUNTIME_CACHE_DIRS=('/opt/telemt/cache','/opt/telemt/tlsfront')
+PANEL_EPHEMERAL_FIELDS=('sessions','subpage_nonces','webauthn_challenges')
+PANEL_HISTORY_FIELDS=('journal','audit')
 VOLATILE_TABLES={'metric_points','history_events','user_ip_history','user_ip_history_collection',
  'user_traffic_buckets','user_traffic_collector','user_traffic_users'}
 
@@ -45,25 +48,33 @@ def source_paths(kind):
     return result
 
 def critical_fingerprint(manifest,objects):
-    """Ignore observation counters and session touches, retaining security edits.
-
-    The archived bytes remain untouched. Creating/revoking a session, changing
-    passkeys/settings and changing file ownership/permissions still count.
-    """
+    """Ignore regenerable Telemt cache, metrics, and transient panel activity."""
     critical=[]
     for entry in sorted(manifest['entries'],key=lambda e:e['path']):
         if entry['path']==DATABASE:continue
+        if any(entry['path']==path or entry['path'].startswith(path+'/') for path in RUNTIME_CACHE_DIRS):continue
         compare=dict(entry)
         if entry['path']==PANEL_STATE and entry['type']=='file':
             state=json.loads(objects[entry['sha256']])
             if not isinstance(state,dict):raise ValueError('Invalid panel state')
-            sessions=state.get('sessions',{})
-            if isinstance(sessions,dict):
-                for session in sessions.values():
-                    if isinstance(session,dict):session.pop('LastSeen',None)
+            for field in PANEL_EPHEMERAL_FIELDS+PANEL_HISTORY_FIELDS:state.pop(field,None)
             compare['sha256']=sha(json.dumps(state,sort_keys=True,separators=(',',':')).encode())
         critical.append(compare)
     return sha(json.dumps(critical,sort_keys=True).encode())
+
+def without_active_sessions(manifest,objects):
+    """Never re-enable a session or nonce from a snapshot on a restored VPS."""
+    entries=[];result=dict(objects)
+    for source in manifest['entries']:
+        entry=dict(source)
+        if entry['path']==PANEL_STATE and entry['type']=='file':
+            state=json.loads(objects[entry['sha256']])
+            if not isinstance(state,dict):raise ValueError('Invalid panel state')
+            for field in PANEL_EPHEMERAL_FIELDS:state.pop(field,None)
+            data=json.dumps(state,separators=(',',':')).encode()
+            entry['sha256']=sha(data);result[entry['sha256']]=data
+        entries.append(entry)
+    return {**manifest,'entries':entries},result
 
 def capture(kind):
     objects={};entries=[];finger=[]

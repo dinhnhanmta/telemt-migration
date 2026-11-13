@@ -26,7 +26,7 @@ Gói cố định chỉ tải lại khi binary/service hoặc thông tin cố đ
 
 ## Tự sao lưu
 
-File-watch phát hiện thay đổi cấu hình; timer kiểm tra bổ sung mỗi phút. Khách, cấu hình, quyền panel và chứng chỉ đổi sẽ tạo snapshot mới. Thời điểm hoạt động `sessions.*.LastSeen` và metrics/bộ đếm SQLite không tự kích hoạt backup. Chúng vẫn được kèm đầy đủ trong mỗi snapshot khi có thay đổi cần lưu. Tạo/thu hồi phiên đăng nhập, thay đổi passkey và cài đặt bảo mật vẫn được phát hiện. Nếu chỉ mở/xem panel hoặc có lưu lượng khách, không commit và không gửi tin nhắn; không có checkpoint thống kê tự gửi mỗi giờ.
+File-watch phát hiện thay đổi cấu hình; timer kiểm tra bổ sung mỗi phút. Thay đổi khách/secret, cấu hình, passkey và cài đặt panel, chứng chỉ Caddy, binary hay service mới tạo snapshot tự động. Cache TLS/proxy của Telemt, phiên đăng nhập, lịch sử hoạt động và bộ đếm SQLite không tự kích hoạt backup; chúng vẫn có thể nằm trong gói đã mã hóa khi có thay đổi cần lưu. Khi phục hồi, panel giữ tài khoản/passkey nhưng bỏ phiên đăng nhập cũ, vì vậy hãy đăng nhập lại. Nếu chỉ mở panel hoặc cache tự làm mới, không có snapshot hay tin Telegram mới.
 
 Snapshot mã hóa được đẩy lên GitHub và gửi dưới dạng tài liệu qua bot Telegram đã cấu hình. Mỗi gói cố định chỉ gửi khi nó đổi. Telegram lỗi sẽ giữ hàng đợi và thử lại; bản GitHub đã thành công vẫn được giữ.
 

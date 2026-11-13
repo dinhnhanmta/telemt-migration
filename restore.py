@@ -2,6 +2,7 @@
 import argparse,getpass,json,os,platform,pwd,shutil,sqlite3,subprocess,tempfile,time,tomllib,urllib.request
 from pathlib import Path
 from archive import *
+from store import without_active_sessions
 
 REPO='dinhnhanmta/telemt-migration'
 
@@ -84,7 +85,7 @@ def main():
         target=args.stage_dir
         if not target.is_absolute() or len(target.parts)<3 or target.exists():raise ValueError('Stage directory must be a new private absolute directory')
         target.mkdir(mode=0o700)
-        materialize(*fixed,target=target,owners=False);materialize(*state,target=target,owners=False)
+        materialize(*fixed,target=target,owners=False);materialize(*without_active_sessions(*state),target=target,owners=False)
         print('Staged verified snapshot without changing services: '+str(target));return
     release=dict(line.split('=',1) for line in Path('/etc/os-release').read_text().splitlines() if '=' in line)
     if platform.machine()!='x86_64' or release.get('ID','').strip('"')!='ubuntu' or release.get('VERSION_ID','').strip('"')!='24.04':raise ValueError('Fresh Ubuntu24.04 amd64 is required')
@@ -105,7 +106,7 @@ def main():
     if latest['fixed']!=info['fixed']:fixed=load(base,latest['fixed'],password,'fixed')
     state=load(base,latest['state'],password,'state');info=latest;validate(fixed,state)
     if marker.exists():run_services('stop')
-    materialize(*fixed);materialize(*state)
+    materialize(*fixed);materialize(*without_active_sessions(*state))
     app=Path('/usr/local/lib/telemt-migration');app.mkdir(parents=True,exist_ok=True,mode=0o700)
     for name in ['archive.py','store.py','transport.py','backup.py','automation.py','restore.py']:
         sourcefile=Path(__file__).resolve().parent/name

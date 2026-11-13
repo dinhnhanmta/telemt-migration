@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-BASE_URL='https://raw.githubusercontent.com/dinhnhanmta/telemt-migration/v1.0.1'
+BASE_URL='https://raw.githubusercontent.com/dinhnhanmta/telemt-migration/v1.0.2'
 if [[ "${1:-}" == --help || "${1:-}" == -h ]]; then
   echo 'Restore existing Telemt Web + Panel + Caddy binaries, services, customers and certificates.'
   echo 'Fresh Ubuntu24.04 amd64, root. Enter the recovery password; then update your DNS.'
@@ -25,11 +25,11 @@ for name in archive.py store.py transport.py backup.py automation.py restore.py;
 done
 cat > "$work_dir/SHA256SUMS" <<'CHECKSUMS'
 0d75612a483640cda6419299a19a564c6de60b78548891044086088acddb9c06  archive.py
-4168b6eb2d5855c1f0b8bfff09177488cbe85746ec7b3a819cec32a5d81c5888  store.py
+22321afbfc7f911877ada29d61214482054bdd096afd698303bcdd689c84dcfc  store.py
 435e248a43d106ce5f079ab96051c9f6e521313a7cb66ba80b066f3bc1c8bfd2  transport.py
 c0d2fd8db3d591b713f73e4673f9b8360888ee019223f028f220c1c22c87ee20  backup.py
 71c77cd115a6095f52a6bf0b872db45970e29b6e744f54536caf6206af75d36f  automation.py
-ae7c29dc5d4cdc301b9da6a6053de19906ec5b7faf9c228bc6409991235bd668  restore.py
+31eca35b8407551a9130f8614a6122523562946dc09bae543b7ee25bd60539b9  restore.py
 CHECKSUMS
 (cd "$work_dir" && sha256sum -c SHA256SUMS)
 PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$work_dir/restore.py" "$@"
